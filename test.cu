@@ -20,9 +20,8 @@ void finalize_allreduce_context(AllreduceContext* context);
 
 int main(int argc, char* argv[]) {
 
-  int size = 32*1024*1024;
-  int dev = 0;
   int i = 0;
+  size_t buffer_size = 64 * 32 + 3;
 
   MPI_Init(&argc, &argv);
 
@@ -31,35 +30,47 @@ int main(int argc, char* argv[]) {
   printf("size: %d, rank: %d, nccl_id: %s\n", context.mpi_size, context.mpi_rank,
          context.nccl_id.internal);
 
-  //ncclAllReduce();
-  size_t buffer_size = 128 * 32;
   void* host_buf = NULL;
   void* dev_buf = NULL;
   allocate_buffer(buffer_size, &host_buf, &dev_buf);
   CUDACHECK(cudaMemset(dev_buf, context.mpi_rank, buffer_size));
   dim3 grid_config(2,2,2);
   dim3 block_confg(2,2,2);
+  float value = (float)(context.mpi_rank) + 1.0f;
   memset_fp32_kernel<<<grid_config, block_confg>>>(
-    (float*)(dev_buf), buffer_size / 4, 0.5);
+    (float*)(dev_buf), buffer_size / 4, value);
   CUDACHECK(cudaMemcpy(host_buf, dev_buf, buffer_size, cudaMemcpyDeviceToHost));
   CUDACHECK(cudaDeviceSynchronize());
-  float* ptr = (float*) host_buf;
+  float* host_fp = (float*) host_buf;
   if (context.mpi_rank == 0) {
     for (i = 0; i < buffer_size / 4; i++) {
-      if (! (ptr[i] == 0.5)) {
+      if (! (host_fp[i] == value)) {
         perror("Set cuda global mem failed.\n");
         exit(-1);
       }
+      printf("%f, ", host_fp[i]);
     }
   }
-  printf("check dev_buf ok");
+  printf("check dev_buf ok.\n");
 
   size_t data_size = buffer_size / size_of_type(ncclInt32);
   cudaStream_t stream;
   CUDACHECK(cudaStreamCreate(&stream));
-  ncclAllReduce(
-      dev_buf, dev_buf, buffer_size, ncclInt32, ncclSum,
-      context.comm, stream);
+  NCCLCHECK(ncclAllReduce(
+      dev_buf, dev_buf, buffer_size, ncclFloat32, ncclSum,
+      context.comm, stream));
+  CUDACHECK(cudaStreamSynchronize(stream));
+
+  CUDACHECK(cudaMemcpy(host_buf, dev_buf, buffer_size, cudaMemcpyDeviceToHost));
+  CUDACHECK(cudaDeviceSynchronize());
+
+  if (context.mpi_rank == 0) {
+    printf("========================\n");
+    for (i = 0; i < buffer_size / 4; i++) {
+      printf("%f, ", host_fp[i]);
+    }
+    printf("\n");
+  }
 
   finalize_allreduce_context(&context);
   MPI_Finalize();

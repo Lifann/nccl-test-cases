@@ -72,7 +72,6 @@ __global__ void memset_fp32_kernel(float* data, size_t size, float value) {
   int thread_id = threadIdx.x * blockDim.y * blockDim.z
                 + threadIdx.y * blockDim.z
                 + threadIdx.z;
-  int nPerThread = nPerBlock / nthreads;
   int thread_offset = block_offset + thread_id;
 
   int i = 0;
