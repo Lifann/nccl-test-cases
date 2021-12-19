@@ -5,25 +5,7 @@
 #include "nccl.h"
 #include "mpi.h"
 
-#define CUDACHECK(cmd) do {                         \
-  cudaError_t e = cmd;                              \
-  if( e != cudaSuccess ) {                          \
-    printf("Failed: Cuda error %s:%d '%s'\n",             \
-        __FILE__,__LINE__,cudaGetErrorString(e));   \
-    exit(EXIT_FAILURE);                             \
-  }                                                 \
-} while(0)
-
-
-#define NCCLCHECK(cmd) do {                         \
-  ncclResult_t r = cmd;                             \
-  if (r!= ncclSuccess) {                            \
-    printf("Failed, NCCL error %s:%d '%s'\n",             \
-        __FILE__,__LINE__,ncclGetErrorString(r));   \
-    exit(EXIT_FAILURE);                             \
-  }                                                 \
-} while(0)
-
+#include "common.h"
 
 typedef struct AllreduceContext {
   ncclUniqueId nccl_id;
@@ -40,16 +22,48 @@ int main(int argc, char* argv[]) {
 
   int size = 32*1024*1024;
   int dev = 0;
+  int i = 0;
 
   MPI_Init(&argc, &argv);
 
   AllreduceContext context;
   initialize_allreduce_context(&context);
-  printf("size: %d, rank: %d, nccl_id: %s\n", context.mpi_size, context.mpi_rank, context.nccl_id.internal);
+  printf("size: %d, rank: %d, nccl_id: %s\n", context.mpi_size, context.mpi_rank,
+         context.nccl_id.internal);
 
+  //ncclAllReduce();
+  size_t buffer_size = 128 * 32;
+  void* host_buf = NULL;
+  void* dev_buf = NULL;
+  allocate_buffer(buffer_size, &host_buf, &dev_buf);
+  CUDACHECK(cudaMemset(dev_buf, context.mpi_rank, buffer_size));
+  dim3 grid_config(2,2,2);
+  dim3 block_confg(2,2,2);
+  memset_fp32_kernel<<<grid_config, block_confg>>>(
+    (float*)(dev_buf), buffer_size / 4, 0.5);
+  CUDACHECK(cudaMemcpy(host_buf, dev_buf, buffer_size, cudaMemcpyDeviceToHost));
+  CUDACHECK(cudaDeviceSynchronize());
+  float* ptr = (float*) host_buf;
+  if (context.mpi_rank == 0) {
+    for (i = 0; i < buffer_size / 4; i++) {
+      if (! (ptr[i] == 0.5)) {
+        perror("Set cuda global mem failed.\n");
+        exit(-1);
+      }
+    }
+  }
+  printf("check dev_buf ok");
+
+  size_t data_size = buffer_size / size_of_type(ncclInt32);
+  cudaStream_t stream;
+  CUDACHECK(cudaStreamCreate(&stream));
+  ncclAllReduce(
+      dev_buf, dev_buf, buffer_size, ncclInt32, ncclSum,
+      context.comm, stream);
+
+  finalize_allreduce_context(&context);
   MPI_Finalize();
-
-  printf("ok\n");
+  printf("done\n");
   return 0;
 }
 
@@ -66,8 +80,11 @@ void initialize_allreduce_context(AllreduceContext* context) {
   }
   MPI_Bcast(&context->nccl_id, sizeof(context->nccl_id), MPI_BYTE, 0, MPI_COMM_WORLD);
 
-  printf("Go init rank\n");
   NCCLCHECK(ncclCommInitRank(&context->comm, context->mpi_size, context->nccl_id, context->mpi_rank));
   printf("Init rank ok\n");
 }
 
+void finalize_allreduce_context(AllreduceContext* context) {
+  NCCLCHECK(ncclCommDestroy(context->comm));
+  printf("Destroy nccl context\n");
+}
