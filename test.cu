@@ -7,6 +7,8 @@
 
 #include "common.h"
 
+//#define DEBUG
+
 typedef struct AllreduceContext {
   ncclUniqueId nccl_id;
   ncclComm_t comm;
@@ -41,6 +43,8 @@ int main(int argc, char* argv[]) {
     (float*)(dev_buf), buffer_size / 4, value);
   CUDACHECK(cudaMemcpy(host_buf, dev_buf, buffer_size, cudaMemcpyDeviceToHost));
   CUDACHECK(cudaDeviceSynchronize());
+
+#ifdef DBEUG
   float* host_fp = (float*) host_buf;
   if (context.mpi_rank == 0) {
     for (i = 0; i < buffer_size / 4; i++) {
@@ -52,6 +56,7 @@ int main(int argc, char* argv[]) {
     }
   }
   printf("check dev_buf ok.\n");
+#endif // DEBUG
 
   size_t data_size = buffer_size / size_of_type(ncclInt32);
   cudaStream_t stream;
@@ -64,6 +69,7 @@ int main(int argc, char* argv[]) {
   CUDACHECK(cudaMemcpy(host_buf, dev_buf, buffer_size, cudaMemcpyDeviceToHost));
   CUDACHECK(cudaDeviceSynchronize());
 
+#ifdef DEBUG
   if (context.mpi_rank == 0) {
     printf("========================\n");
     for (i = 0; i < buffer_size / 4; i++) {
@@ -71,6 +77,7 @@ int main(int argc, char* argv[]) {
     }
     printf("\n");
   }
+#endif // DEBUG
 
   finalize_allreduce_context(&context);
   MPI_Finalize();
