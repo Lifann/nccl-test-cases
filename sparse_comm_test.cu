@@ -74,6 +74,12 @@ int main(int argc, char* argv[]) {
 
   uint32_t* host_fp = (uint32_t*) host_buf;
 
+  cudaEvent_t event_start, event_stop;
+  CUDACHECK(cudaEventCreate(&event_start));
+  CUDACHECK(cudaEventCreate(&event_stop));
+  CUDACHECK(cudaEventRecord(event_start, stream));
+  float cost = 0;
+
   auto t1 = now();
 
   printf("Ready to allreduce\n");
@@ -84,6 +90,12 @@ int main(int argc, char* argv[]) {
       dev_buf, dev_buf, data_size / DUTY_RATIO, ncclUint32, ncclAvg,
       context.comm, stream));
   printf("Wait allreduce stream ...\n");
+
+  CUDACHECK(cudaEventRecord(event_stop, stream));
+  CUDACHECK(cudaEventSynchronize(event_stop));
+  CUDACHECK(cudaEventElapsedTime(&cost, event_start, event_stop));
+  printf("Sparse allreduce event elapse: %f\n", cost);
+
   CUDACHECK(cudaStreamSynchronize(stream));
 
   auto t2 = now();

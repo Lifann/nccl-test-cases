@@ -32,7 +32,6 @@
   }                                                 \
 } while(0)
 
-//#define COMM_VOLUMN 1024llu * 1024llu * 1024llu * 1llu // 1G, 5% duty ratio
 #define COMM_VOLUMN 1024llu * 1024llu * 1024llu * 2 // 2G
 #define DUTY_RATIO 20
 

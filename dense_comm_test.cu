@@ -9,8 +9,6 @@
 
 #include "common.h"
 
-#define DEBUG
-
 typedef struct AllreduceContext {
   ncclUniqueId nccl_id;
   ncclComm_t comm;
@@ -74,6 +72,12 @@ int main(int argc, char* argv[]) {
 
   uint32_t* host_fp = (uint32_t*) host_buf;
 
+  cudaEvent_t event_start, event_stop;
+  CUDACHECK(cudaEventCreate(&event_start));
+  CUDACHECK(cudaEventCreate(&event_stop));
+  CUDACHECK(cudaEventRecord(event_start, stream));
+  float cost = 0;
+
   auto t1 = now();
 
   printf("Ready to allreduce\n");
@@ -81,6 +85,12 @@ int main(int argc, char* argv[]) {
       dev_buf, dev_buf, data_size, ncclUint32, ncclAvg,
       context.comm, stream));
   printf("Wait allreduce stream ...\n");
+
+  CUDACHECK(cudaEventRecord(event_stop, stream));
+  CUDACHECK(cudaEventSynchronize(event_stop));
+  CUDACHECK(cudaEventElapsedTime(&cost, event_start, event_stop));
+  printf("Dense allreduce event elapse: %f\n", cost);
+
   CUDACHECK(cudaStreamSynchronize(stream));
 
   auto t2 = now();
@@ -91,16 +101,6 @@ int main(int argc, char* argv[]) {
   CUDACHECK(cudaMemcpyAsync(host_buf, dev_buf, buffer_size, cudaMemcpyDeviceToHost, stream));
   CUDACHECK(cudaStreamSynchronize(stream));
   printf("Allreduce done\n");
-
-#ifdef DEBUG
-  if (context.mpi_rank == 0) {
-    printf("========================\n");
-    for (i = data_size - 10; i < data_size; i++) {
-      printf("%d, ", host_fp[i]);
-    }
-    printf("\n");
-  }
-#endif // DEBUG
 
   finalize_allreduce_context(&context);
   MPI_Finalize();
